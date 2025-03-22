@@ -33,7 +33,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
 logger.info("Iniciando aplicativo...")
 logger.info(f"Versão do Python: {sys.version}")
 logger.info(f"Versão do OpenCV: {cv2.__version__}")
