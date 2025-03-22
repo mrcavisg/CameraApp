@@ -38,21 +38,24 @@
 
             powershell  
 	    
-		python -m pip install --upgrade pip
+			python -m pip install --upgrade pip
 
 # 04 - Instalar as bibliotecas
 
-		pip install opencv-python
+			pip install opencv-python
 	        pip install onvif-zeep 
-		pip innstall pillow
+			pip innstall pillow
 	        pip intall numpy
 	        pip install appdirs
-	        pip install requests 
-	 	#ou
-   		pip install opencv-python onvif-zeep pillow numpy appdirs requests
+	        pip install requests
+
+# ou
+
+   			pip install opencv-python onvif-zeep pillow numpy appdirs requests
 
 
 # 05 - Criar executável com INNO
 
-	Em construção
+	Em construção.
  
+
