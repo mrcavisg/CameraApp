@@ -50,3 +50,9 @@
 	        pip install requests 
 	 	#ou
    		pip install opencv-python onvif-zeep pillow numpy appdirs requests
+
+
+# 05 - Criar executável com INNO
+
+	Em construção
+ 
