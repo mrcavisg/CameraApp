@@ -42,11 +42,11 @@
 
 # 04 - Instalar as bibliotecas
 
-	    pip install opencv-python
-            pip install onvif-zeep 
-            pip innstall pillow
-            pip intall numpy
-            pip install appdirs
-            pip install requests 
-            ou
-            pip install opencv-python onvif-zeep pillow numpy appdirs requests
+		pip install opencv-python
+	        pip install onvif-zeep 
+		pip innstall pillow
+	        pip intall numpy
+	        pip install appdirs
+	        pip install requests 
+	            ou
+	        pip install opencv-python onvif-zeep pillow numpy appdirs requests
