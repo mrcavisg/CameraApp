@@ -48,5 +48,5 @@
 	        pip intall numpy
 	        pip install appdirs
 	        pip install requests 
-	            ou
-	        pip install opencv-python onvif-zeep pillow numpy appdirs requests
+	 	#ou
+   		pip install opencv-python onvif-zeep pillow numpy appdirs requests
