@@ -1,9 +1,8 @@
-# Este código contém a classe CameraApp, responsável pela interface gráfica e pela lógica principal do aplicativo.
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 import re
 import numpy as np
+import cv2
 from PIL import Image, ImageTk
 from camera import Camera
 from utils import save_cameras, load_cameras
@@ -14,7 +13,7 @@ class CameraApp:
         self.logger = logger
         self.logger.info("Inicializando CameraApp...")
         self.root = root
-        self.root.title("Camera App V 0.2 by CFA TECH")
+        self.root.title("CFA TECH - Camera App by CFA TECH")
         self.root.geometry("1280x720")
         self.root.protocol("WM_DELETE_WINDOW", self.close_window)
         self.cameras = []
@@ -165,6 +164,7 @@ class CameraApp:
 
             ttk.Button(button_frame, text="Adicionar Câmera ONVIF", command=self.add_onvif_camera_dialog).pack(side=tk.LEFT, padx=5)
             ttk.Button(button_frame, text="Adicionar Câmera RTSP", command=self.add_rtsp_camera_dialog).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Editar Câmera", command=self.edit_camera_dialog).pack(side=tk.LEFT, padx=5)  # Novo botão
             ttk.Button(button_frame, text="Remover Câmera", command=self.remove_camera).pack(side=tk.LEFT, padx=5)
 
             self.camera_list = ttk.Treeview(
@@ -322,6 +322,146 @@ class CameraApp:
             self.logger.info("Diálogo de adicionar câmera RTSP aberto.")
         except Exception as e:
             self.logger.error(f"Erro ao abrir diálogo de adicionar câmera RTSP: {e}")
+
+    def edit_camera_dialog(self):
+        try:
+            selected_item = self.camera_list.selection()
+            if not selected_item:
+                messagebox.showwarning("Aviso", "Selecione uma câmera para editar.", parent=self.camera_list_window)
+                self.logger.warning("Tentativa de editar câmera sem seleção.")
+                return
+
+            index = self.camera_list.index(selected_item[0])
+            if index >= len(self.cameras):
+                messagebox.showerror("Erro", "Índice de câmera inválido.", parent=self.camera_list_window)
+                self.logger.error("Índice de câmera inválido ao tentar editar.")
+                return
+
+            camera = self.cameras[index]
+            camera_type = "RTSP" if camera.rtsp_url else "ONVIF"
+
+            dialog = tk.Toplevel(self.camera_list_window)
+            dialog.title(f"Editar Câmera ({camera_type})")
+            dialog.transient(self.camera_list_window)
+            dialog.grab_set()
+            if camera_type == "RTSP":
+                dialog.geometry("400x150")
+            else:
+                dialog.geometry("300x200")
+            self.center_window(dialog)
+
+            if camera_type == "ONVIF":
+                tk.Label(dialog, text="IP:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+                ip_entry = ttk.Entry(dialog)
+                ip_entry.grid(row=0, column=1, padx=5, pady=5)
+                ip_entry.insert(0, camera.ip)
+
+                tk.Label(dialog, text="Porta:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+                port_entry = ttk.Entry(dialog)
+                port_entry.grid(row=1, column=1, padx=5, pady=5)
+                port_entry.insert(0, str(camera.port))
+
+                tk.Label(dialog, text="Usuário:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+                user_entry = ttk.Entry(dialog)
+                user_entry.grid(row=2, column=1, padx=5, pady=5)
+                user_entry.insert(0, camera.username)
+
+                tk.Label(dialog, text="Senha:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
+                password_entry = ttk.Entry(dialog, show="*")
+                password_entry.grid(row=3, column=1, padx=5, pady=5)
+                password_entry.insert(0, camera.password)
+
+                def save_edited_camera():
+                    try:
+                        ip = ip_entry.get()
+                        try:
+                            port = int(port_entry.get())
+                        except ValueError:
+                            messagebox.showerror("Erro", "Porta deve ser um número.", parent=dialog)
+                            self.logger.error("Erro ao editar câmera ONVIF: Porta inválida.")
+                            return
+                        username = user_entry.get()
+                        password = password_entry.get()
+
+                        # Desconectar a câmera antiga
+                        camera.disconnect()
+                        # Criar uma nova câmera com os dados atualizados
+                        new_camera = Camera(ip, port, username, password, logger=self.logger)
+                        if new_camera.connect():
+                            self.cameras[index] = new_camera
+                            self.camera_list.item(selected_item[0], values=("ONVIF", ip, port, username, new_camera.rtsp_url, "Conectado"))
+                            save_cameras(self.cameras)
+                            self.create_video_labels()
+                            dialog.destroy()
+                            self.logger.info(f"Câmera ONVIF editada: IP={ip}, Porta={port}, Usuário={username}")
+                        else:
+                            self.logger.error(f"Falha ao reconectar câmera ONVIF após edição: IP={ip}")
+                            messagebox.showerror("Erro", f"Falha ao reconectar à câmera {ip}. Verifique os logs para mais detalhes.", parent=dialog)
+                    except Exception as e:
+                        self.logger.error(f"Erro ao salvar câmera ONVIF editada: {e}")
+                        messagebox.showerror("Erro", f"Erro ao salvar câmera: {e}", parent=dialog)
+
+                save_button = ttk.Button(dialog, text="Salvar", command=save_edited_camera)
+                save_button.grid(row=4, column=0, columnspan=2, pady=10)
+
+            else:  # RTSP
+                tk.Label(dialog, text="URL RTSP:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+                rtsp_entry = ttk.Entry(dialog)
+                rtsp_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+                rtsp_entry.insert(0, camera.rtsp_url)
+                dialog.grid_columnconfigure(1, weight=1)
+
+                def save_edited_camera():
+                    try:
+                        rtsp_url = rtsp_entry.get()
+                        if not re.match(r"^rtsp://[^\s]+$", rtsp_url):
+                            messagebox.showerror("Erro", "URL RTSP inválida. Deve começar com rtsp://", parent=dialog)
+                            self.logger.error(f"Erro ao editar câmera RTSP: URL inválida ({rtsp_url})")
+                            return
+
+                        try:
+                            parts = rtsp_url.split("@")
+                            user_pass = parts[0].replace("rtsp://", "") if len(parts) == 2 else ""
+                            ip_port_path = parts[1] if len(parts) == 2 else parts[0].replace("rtsp://", "")
+                            user, password = user_pass.split(":") if user_pass else ("", "")
+                            ip_port = ip_port_path.split("/")[0]
+                            ip = ip_port
+                            port = 554
+                            if ":" in ip_port:
+                                ip, port_str = ip_port.split(":")
+                                port = int(port_str)
+                        except Exception as e:
+                            messagebox.showerror("Erro", f"Erro ao analisar URL RTSP: {e}", parent=dialog)
+                            self.logger.error(f"Erro ao analisar URL RTSP: {e}")
+                            return
+
+                        # Desconectar a câmera antiga
+                        camera.disconnect()
+                        # Criar uma nova câmera com os dados atualizados
+                        new_camera = Camera(ip, port, user, password, rtsp_url, logger=self.logger)
+                        if new_camera.connect():
+                            self.cameras[index] = new_camera
+                            self.camera_list.item(selected_item[0], values=("RTSP", ip, port, user, rtsp_url, "Conectado"))
+                            save_cameras(self.cameras)
+                            self.create_video_labels()
+                            dialog.destroy()
+                            self.logger.info(f"Câmera RTSP editada: IP={ip}, Porta={port}, Usuário={user}, URL={rtsp_url}")
+                        else:
+                            self.logger.error(f"Falha ao reconectar câmera RTSP após edição: URL={rtsp_url}")
+                            messagebox.showerror("Erro", f"Falha ao reconectar à câmera {rtsp_url}. Verifique os logs para mais detalhes.", parent=dialog)
+                    except Exception as e:
+                        self.logger.error(f"Erro ao salvar câmera RTSP editada: {e}")
+                        messagebox.showerror("Erro", f"Erro ao salvar câmera: {e}", parent=dialog)
+
+                save_button = ttk.Button(dialog, text="Salvar", command=save_edited_camera)
+                save_button.grid(row=1, column=0, columnspan=2, pady=10)
+
+            dialog.bind("<Return>", lambda e: save_edited_camera())
+            dialog.bind("<Escape>", lambda e: dialog.destroy())
+            self.logger.info("Diálogo de edição de câmera aberto.")
+        except Exception as e:
+            self.logger.error(f"Erro ao abrir diálogo de edição de câmera: {e}")
+            messagebox.showerror("Erro", f"Erro ao abrir diálogo de edição: {e}", parent=self.camera_list_window)
 
     def remove_camera(self):
         try:
