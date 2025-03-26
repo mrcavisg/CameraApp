@@ -12,50 +12,53 @@
 
   
 
-#  02 - Criar e iniciar o um venv fora do diretório padrão do código(importante para não poluir os coommits)
+#  02 - Criar e iniciar o um venv
 
-            bash 
-	    
-	    	python3 -m venv nome_do_ambiente #cria um ambiente virtual
+Adicionar o venv no gitignore.
 
-            bash 
-	    
-	    	source nome_do_ambiente/bin/activate #inicia um ambeinte virtual
+bash 
 
-            powershell 
-	    
-     		python -m venv venv #cria um ambiente virtual
+python3 -m venv nome_do_ambiente #cria um ambiente virtual
+bash 
 
-            powershell 
-	    
-     		venv\scripts\activate #inicia um ambiente virutal
+source nome_do_ambiente/bin/activate #inicia um ambeinte virtual
+powershell 
+
+python -m venv venv #cria um ambiente virtual
+powershell 
+
+venv\scripts\activate #inicia um ambiente virutal
 
 # 03 - Instalar o PIP
 
-            bash 
+bash 
 	    
-     		sudo apt install python3-pip
+sudo apt install python3-pip
 
-            powershell  
+powershell  
 	    
-			python -m pip install --upgrade pip
+python -m pip install --upgrade pip
+
+OBS: Utilizar o python 3.13.2 dentro do ambiente virtual.
 
 # 04 - Instalar as bibliotecas
 
-			pip install opencv-python
-	        pip install onvif-zeep 
-			pip innstall pillow
-	        pip intall numpy
-	        pip install appdirs
-	        pip install requests
+pip install opencv-python
+pip install onvif-zeep 
+pip innstall pillow
+pip intall numpy
+pip install appdirs
+pip install requests
 
 # ou
 
-   			pip install opencv-python onvif-zeep pillow numpy appdirs requests
+pip install opencv-python onvif-zeep pillow numpy appdirs requests
 
 
 # 05 - Criar executável com INNO
 
 	Em construção.
+
+	
  
 
