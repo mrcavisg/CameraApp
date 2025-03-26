@@ -1,7 +1,11 @@
+# camera.py
 import cv2
 from onvif import ONVIFCamera
 import logging
 import os
+from wsdl_utils import get_onvif_wsdl_files
+from zeep.transports import Transport
+import requests
 
 class Camera:
     def __init__(self, ip, port, username, password, rtsp_url="", logger=None):
@@ -16,7 +20,7 @@ class Camera:
         self.cap = None
         self.connected = False
 
-    def connect(self, timeout=10):  # Adicionar parâmetro timeout
+    def connect(self, timeout=10):
         try:
             if self.rtsp_url:
                 self.cap = cv2.VideoCapture(self.rtsp_url)
@@ -28,21 +32,37 @@ class Camera:
                     self.logger.error(f"Falha ao conectar à câmera RTSP: {self.rtsp_url}")
                     return False
             else:
-                # Definir o diretório WSDL manualmente
                 wsdl_dir = os.path.join(os.path.dirname(__file__), "wsdl")
-                self.onvif_cam = ONVIFCamera(self.ip, self.port, self.username, self.password, wsdl_dir=wsdl_dir, no_cache=True, adjust_time=True, connect_timeout=timeout)
+                if not os.path.exists(wsdl_dir):
+                    os.makedirs(wsdl_dir)
+                if not get_onvif_wsdl_files(wsdl_dir):
+                    self.logger.error("Falha ao preparar o diretório WSDL. A conexão ONVIF não pode prosseguir.")
+                    return False
+                self.logger.info(f"Diretório WSDL: {wsdl_dir}")
+                
+                session = requests.Session()
+                session.timeout = timeout
+                transport = Transport(session=session)
+                
+                self.logger.debug(f"Tentando criar ONVIFCamera com IP={self.ip}, Porta={self.port}, Usuário={self.username}")
+                self.onvif_cam = ONVIFCamera(self.ip, self.port, self.username, self.password, wsdl_dir=wsdl_dir, transport=transport)
+                self.logger.debug("ONVIFCamera criado com sucesso")
+                
                 media = self.onvif_cam.create_media_service()
                 profiles = media.GetProfiles()
                 if profiles:
                     profile = profiles[0]
-                    stream_uri = media.GetStreamUri({'StreamSetup': {'Stream': 'RTP-Unicast', 'Transport': 'RTSP'}, 'ProfileToken': profile.token})
+                    stream_uri = media.GetStreamUri(
+                        {'StreamSetup': {'Stream': 'RTP-Unicast', 'Transport': 'RTSP'},
+                         'ProfileToken': profile.token})
                     self.rtsp_url = stream_uri.Uri
                     if self.username and self.password:
-                        self.rtsp_url = self.rtsp_url.replace("rtsp://", f"rtsp://{self.username}:{self.password}@")
+                        self.rtsp_url = self.rtsp_url.replace("rtsp://",
+                                                            f"rtsp://{self.username}:{self.password}@")
                     self.cap = cv2.VideoCapture(self.rtsp_url)
                     if self.cap.isOpened():
                         self.connected = True
-                        self.logger.info(f"Conexão bem-sucedida com a câmera: {self.ip}")
+                        self.logger.info(f"Conexão bem-sucedida com a câmera: {self.ip}, RTSP_URL={self.rtsp_url}")
                         return True
                     else:
                         self.logger.error(f"Falha ao conectar à câmera ONVIF: {self.ip}")

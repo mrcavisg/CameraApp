@@ -1,50 +1,33 @@
+# utils.py
 import logging
 import logging.handlers
 import os
 import json
-import sys  # Adicionada a importação de sys
+import sys
 
 def setup_logging(log_file):
-    """
-    Configura o logging para escrever em um arquivo e, opcionalmente, no console.
-    
-    Args:
-        log_file (str): Caminho do arquivo de log.
-    
-    Returns:
-        logging.Logger: Logger configurado.
-    """
-    # Criar um logger
     logger = logging.getLogger('utils')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)  # Alterado para DEBUG
 
-    # Evitar múltiplos handlers se a função for chamada mais de uma vez
     if not logger.handlers:
-        # Criar um handler para o arquivo de log com rotação
         file_handler = logging.handlers.RotatingFileHandler(
             log_file, maxBytes=5*1024*1024, backupCount=5
         )
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(logging.DEBUG)  # Alterado para DEBUG
 
-        # Criar um handler para o console (opcional)
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.DEBUG)  # Alterado para DEBUG
 
-        # Definir o formato dos logs
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
 
-        # Adicionar os handlers ao logger
         logger.addHandler(file_handler)
         logger.addHandler(console_handler)
 
     return logger
 
 def save_cameras(cameras):
-    """
-    Salva a lista de câmeras em um arquivo JSON.
-    """
     try:
         data_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "CFATech", "CameraApp")
         if getattr(sys, 'frozen', False):
@@ -71,9 +54,6 @@ def save_cameras(cameras):
         raise
 
 def load_cameras():
-    """
-    Carrega a lista de câmeras de um arquivo JSON.
-    """
     try:
         data_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "CFATech", "CameraApp")
         if getattr(sys, 'frozen', False):

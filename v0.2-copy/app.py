@@ -1,3 +1,4 @@
+# app.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 import re
@@ -10,15 +11,9 @@ from config import FRAME_UPDATE_INTERVAL
 from wsdiscovery import WSDiscovery
 from wsdiscovery.service import Service
 from onvif import ONVIFCamera
-
-# Adicionar log para verificar a origem da classe Camera
-import camera
 import logging
-logger = logging.getLogger(__name__)
-logger.info(f"Classe Camera importada de: {Camera.__module__}")
-logger.info(f"Módulo camera importado de: {camera.__file__}")
 
-# Classe para simular o comportamento do QName
+# Classe corrigida para compatibilidade com wsdiscovery
 class SimpleQName:
     def __init__(self, namespace, local_part):
         self.namespace = namespace
@@ -27,7 +22,7 @@ class SimpleQName:
     def getNamespace(self):
         return self.namespace
 
-    def getLocalPart(self):
+    def getLocalname(self):  # Alterado de getLocalPart para getLocalname
         return self.local_part
 
 class CameraApp:
@@ -215,39 +210,31 @@ class CameraApp:
             self.logger.error(f"Erro ao abrir janela de gerenciamento de câmeras: {e}")
 
     def discover_cameras(self):
-        """
-        Realiza a busca automática de câmeras ONVIF na rede local e exibe na lista.
-        """
         try:
             self.logger.info("Iniciando busca automática de câmeras ONVIF...")
-            # Limpar a lista atual para evitar duplicatas
             for item in self.camera_list.get_children():
                 self.camera_list.delete(item)
 
-            # Usar WSDiscovery para encontrar câmeras ONVIF
             wsd = WSDiscovery()
             wsd.start()
 
-            # Definir o tipo de serviço que queremos descobrir (ONVIF)
-            # Criar um objeto SimpleQName para simular o comportamento esperado
             type_ = SimpleQName("http://www.onvif.org/ver10/network/wsdl", "NetworkVideoTransmitter")
-            services = wsd.searchServices(types=[type_], timeout=5)  # Busca por 5 segundos
+            services = wsd.searchServices(types=[type_], timeout=5)
 
             discovered_cameras = []
             for service in services:
-                # Extrair informações do serviço
                 xaddrs = service.getXAddrs()
                 for xaddr in xaddrs:
                     if "onvif" in xaddr.lower():
                         ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', xaddr)
                         if ip_match:
                             ip = ip_match.group(1)
-                            # Tentar conectar para obter mais informações
                             try:
-                                onvif_cam = ONVIFCamera(ip, 80, "admin", "", wsdl_dir=None, no_cache=True)
+                                wsdl_dir = os.path.join(os.path.dirname(__file__), "wsdl")
+                                onvif_cam = ONVIFCamera(ip, 80, "admin", "", wsdl_dir=wsdl_dir)
                                 device_info = onvif_cam.devicemgmt.GetDeviceInformation()
-                                username = "admin"  # Usuário padrão, pode ser ajustado
-                                port = 80  # Porta padrão ONVIF
+                                username = "admin"
+                                port = 80
                                 rtsp_url = ""
                                 status = "Descoberto (não conectado)"
                                 discovered_cameras.append({
@@ -265,13 +252,11 @@ class CameraApp:
 
             wsd.stop()
 
-            # Adicionar câmeras descobertas à lista
             for cam in discovered_cameras:
                 self.camera_list.insert("", "end", values=(
                     cam["type"], cam["ip"], cam["port"], cam["username"], cam["rtsp_url"], cam["status"]
                 ))
 
-            # Re-adicionar câmeras já conectadas
             for cam in self.cameras:
                 camera_type = "RTSP" if cam.rtsp_url else "ONVIF"
                 status = "Conectado" if cam.connected else "Desconectado"
@@ -477,9 +462,7 @@ class CameraApp:
                         username = user_entry.get()
                         password = password_entry.get()
 
-                        # Desconectar a câmera antiga
                         camera.disconnect()
-                        # Criar uma nova câmera com os dados atualizados
                         new_camera = Camera(ip, port, username, password, logger=self.logger)
                         self.logger.info(f"Tipo do objeto Camera criado (editado): {type(new_camera)}")
                         if new_camera.connect():
@@ -530,9 +513,7 @@ class CameraApp:
                             self.logger.error(f"Erro ao analisar URL RTSP: {e}")
                             return
 
-                        # Desconectar a câmera antiga
                         camera.disconnect()
-                        # Criar uma nova câmera com os dados atualizados
                         new_camera = Camera(ip, port, user, password, rtsp_url, logger=self.logger)
                         self.logger.info(f"Tipo do objeto Camera criado (editado): {type(new_camera)}")
                         if new_camera.connect():
@@ -612,16 +593,15 @@ class CameraApp:
 
     def load_cameras(self):
         try:
-            data = load_cameras()  # Carrega os dados do JSON (lista de dicionários)
-            self.cameras = []  # Limpa a lista atual para evitar duplicatas
+            data = load_cameras()
+            self.cameras = []
             for cam_data in data:
-                # Cria uma nova instância de Camera com os dados do JSON
                 camera = Camera(
                     ip=cam_data["ip"],
                     port=cam_data["port"],
                     username=cam_data["username"],
                     password=cam_data["password"],
-                    rtsp_url=cam_data.get("rtsp_url", ""),  # Usa .get() para evitar KeyError
+                    rtsp_url=cam_data.get("rtsp_url", ""),
                     logger=self.logger
                 )
                 self.cameras.append(camera)
@@ -648,7 +628,6 @@ class CameraApp:
 
             for i, camera in enumerate(self.cameras):
                 if i < len(self.labels):
-                    # Verifica se camera é uma instância de Camera
                     if not isinstance(camera, Camera):
                         self.logger.error(f"Objeto na lista de câmeras (índice {i}) não é uma instância de Camera: {type(camera)}")
                         continue
