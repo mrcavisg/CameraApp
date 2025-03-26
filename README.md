@@ -48,7 +48,7 @@ pip install onvif-zeep
 pip innstall pillow
 pip intall numpy
 pip install appdirs
-pip install requests
+'pip install requests'
 
 # ou
 
