@@ -1,13 +1,7 @@
-# Este código contém a classe Camera, responsável por gerenciar a conexão e leitura de frames das câmeras.
-
 import cv2
-import onvif
-import queue
 import threading
-import time
-import os
-import sys
-from config import MAX_FRAME_QUEUE_SIZE, MAX_RETRIES, RETRY_DELAY_BASE
+import logging
+from onvif import ONVIFCamera
 
 class Camera:
     def __init__(self, ip, port, username, password, rtsp_url="", logger=None):
@@ -16,117 +10,82 @@ class Camera:
         self.username = username
         self.password = password
         self.rtsp_url = rtsp_url
-        self.cam = None
-        self.frame_queue = queue.Queue(maxsize=MAX_FRAME_QUEUE_SIZE)
-        self.stop_event = threading.Event()
-        self.thread = None
+        self.logger = logger or logging.getLogger(__name__)
         self.connected = False
         self.cap = None
-        self.logger = logger
+        self.thread = None
+        self.stop_event = threading.Event()
+        self.frame = None
         self.logger.info(f"Câmera criada: IP={self.ip}, Porta={self.port}, Usuário={self.username}, RTSP_URL={self.rtsp_url}")
 
     def connect(self):
-        self.logger.info(f"Tentando conectar à câmera {self.ip}...")
+        """
+        Tenta conectar à câmera via ONVIF ou RTSP.
+        Retorna True se a conexão for bem-sucedida, False caso contrário.
+        """
         try:
-            if not self.rtsp_url:
-                self.logger.info(f"Descobrindo URL RTSP via ONVIF para {self.ip}")
-                if getattr(sys, 'frozen', False):
-                    wsdl_path = os.path.join(sys._MEIPASS, "onvif", "wsdl")
-                    self.logger.info(f"Configurando caminho WSDL para: {wsdl_path}")
-                    self.cam = onvif.ONVIFCamera(self.ip, self.port, self.username, self.password, wsdl_path=wsdl_path)
-                else:
-                    self.cam = onvif.ONVIFCamera(self.ip, self.port, self.username, self.password)
-                media = self.cam.create_media_service()
-                profiles = media.GetProfiles()
-                token = profiles[0].token
-                stream_uri = media.GetStreamUri(
-                    {"StreamSetup": {"Stream": "RTP-Unicast", "Transport": {"Protocol": "RTSP"}},
-                     "ProfileToken": token}
-                )
+            if self.rtsp_url:
+                # Conexão via RTSP
+                self.cap = cv2.VideoCapture(self.rtsp_url)
+                if not self.cap.isOpened():
+                    self.logger.error(f"Falha ao conectar à câmera RTSP: {self.rtsp_url}")
+                    return False
+            else:
+                # Conexão via ONVIF
+                onvif_cam = ONVIFCamera(self.ip, self.port, self.username, self.password)
+                media_service = onvif_cam.create_media_service()
+                profiles = media_service.GetProfiles()
+                if not profiles:
+                    self.logger.error(f"Nenhum perfil ONVIF encontrado para a câmera: {self.ip}")
+                    return False
+                stream_uri = media_service.GetStreamUri({'StreamSetup': {'Stream': 'RTP-Unicast', 'Transport': 'RTSP'}, 'ProfileToken': profiles[0].token})
                 self.rtsp_url = stream_uri.Uri
-                self.logger.info(f"URL RTSP descoberta: {self.rtsp_url}")
-
-            self.logger.info(f"Tentando conectar ao stream RTSP: {self.rtsp_url}")
-            self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 10)
-            self.cap.set(cv2.CAP_PROP_FPS, 15)
-
-            os.environ["OPENCV_FFMPEG_READ_TIMEOUT"] = "60000"
-            os.environ["OPENCV_FFMPEG_READ_ATTEMPTS"] = "3"
-            os.environ["OPENCV_FFMPEG_READ_TRANSPORT"] = "tcp"
-
-            if not self.cap.isOpened():
-                raise Exception(f"Não foi possível abrir a câmera RTSP: {self.rtsp_url}")
-
-            ret, frame = self.cap.read()
-            if not ret:
-                raise Exception(f"Não foi possível ler o primeiro frame do stream RTSP: {self.rtsp_url}")
+                self.cap = cv2.VideoCapture(self.rtsp_url)
+                if not self.cap.isOpened():
+                    self.logger.error(f"Falha ao conectar à câmera ONVIF: {self.ip}, RTSP_URL={self.rtsp_url}")
+                    return False
 
             self.connected = True
-            self.thread = threading.Thread(target=self._read_frames, daemon=True)
+            self.stop_event.clear()
+            self.thread = threading.Thread(target=self._capture_frames, daemon=True)
             self.thread.start()
-            self.logger.info(f"Conectado à câmera {self.ip} com sucesso")
+            self.logger.info(f"Conexão bem-sucedida com a câmera: {self.ip}")
             return True
-
         except Exception as e:
             self.logger.error(f"Erro ao conectar à câmera {self.ip}: {e}")
             self.connected = False
             return False
 
-    def _read_frames(self):
-        retry_count = 0
+    def _capture_frames(self):
+        """
+        Captura frames da câmera em um loop contínuo.
+        """
         while not self.stop_event.is_set():
-            try:
-                if not self.cap or not self.cap.isOpened():
-                    self.logger.warning(f"VideoCapture não está aberto para {self.ip}. Tentando reconectar...")
-                    if not self.connect():
-                        retry_count += 1
-                        if retry_count >= MAX_RETRIES:
-                            self.logger.error(f"Excedeu o número máximo de tentativas ({MAX_RETRIES}) para reconectar à câmera {self.ip}.")
-                            break
-                        time.sleep(RETRY_DELAY_BASE ** retry_count)
-                        continue
-                    retry_count = 0
-
+            if self.cap and self.cap.isOpened():
                 ret, frame = self.cap.read()
                 if ret:
-                    retry_count = 0
-                    if self.frame_queue.full():
-                        try:
-                            self.frame_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                    self.frame_queue.put(frame)
+                    self.frame = frame
                 else:
-                    self.logger.warning(f"Falha na leitura, tentando reconectar a {self.ip} (tentativa {retry_count + 1}/{MAX_RETRIES})...")
-                    self.cap.release()
-                    if not self.connect():
-                        retry_count += 1
-                        if retry_count >= MAX_RETRIES:
-                            self.logger.error(f"Excedeu o número máximo de tentativas ({MAX_RETRIES}) para reconectar à câmera {self.ip}.")
-                            break
-                        time.sleep(RETRY_DELAY_BASE ** retry_count)
-                    else:
-                        retry_count = 0
-            except Exception as e:
-                self.logger.error(f"Erro ao ler frames da câmera {self.ip}: {e}")
-                retry_count += 1
-                if retry_count >= MAX_RETRIES:
-                    self.logger.error(f"Excedeu o número máximo de tentativas ({MAX_RETRIES}) para reconectar à câmera {self.ip}.")
+                    self.logger.warning(f"Falha ao capturar frame da câmera: {self.ip}")
+                    self.connected = False
                     break
-                time.sleep(RETRY_DELAY_BASE ** retry_count)
-        if self.cap:
-            self.cap.release()
-        self.logger.info(f"Thread de leitura da câmera {self.ip} encerrada.")
-        self.connected = False
+            else:
+                self.logger.error(f"Conexão com a câmera perdida: {self.ip}")
+                self.connected = False
+                break
 
     def get_frame(self):
-        try:
-            return self.frame_queue.get_nowait()
-        except queue.Empty:
+        """
+        Retorna o último frame capturado.
+        """
+        if not self.connected or self.frame is None:
             return None
+        return self.frame
 
     def disconnect(self):
+        """
+        Desconecta a câmera e libera os recursos.
+        """
         self.logger.info(f"Desconectando câmera {self.ip}...")
         self.stop_event.set()
         if self.thread:

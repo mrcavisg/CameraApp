@@ -8,6 +8,13 @@ from camera import Camera
 from utils import save_cameras, load_cameras
 from config import FRAME_UPDATE_INTERVAL
 
+# Adicionar log para verificar a origem da classe Camera
+import camera
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"Classe Camera importada de: {Camera.__module__}")
+logger.info(f"Módulo camera importado de: {camera.__file__}")
+
 class CameraApp:
     def __init__(self, root, logger):
         self.logger = logger
@@ -164,7 +171,7 @@ class CameraApp:
 
             ttk.Button(button_frame, text="Adicionar Câmera ONVIF", command=self.add_onvif_camera_dialog).pack(side=tk.LEFT, padx=5)
             ttk.Button(button_frame, text="Adicionar Câmera RTSP", command=self.add_rtsp_camera_dialog).pack(side=tk.LEFT, padx=5)
-            ttk.Button(button_frame, text="Editar Câmera", command=self.edit_camera_dialog).pack(side=tk.LEFT, padx=5)  # Novo botão
+            ttk.Button(button_frame, text="Editar Câmera", command=self.edit_camera_dialog).pack(side=tk.LEFT, padx=5)
             ttk.Button(button_frame, text="Remover Câmera", command=self.remove_camera).pack(side=tk.LEFT, padx=5)
 
             self.camera_list = ttk.Treeview(
@@ -238,13 +245,14 @@ class CameraApp:
                     password = password_entry.get()
 
                     camera = Camera(ip, port, username, password, logger=self.logger)
+                    self.logger.info(f"Tipo do objeto Camera criado: {type(camera)}")
                     if camera.connect():
                         self.cameras.append(camera)
                         self.camera_list.insert("", "end", values=("ONVIF", ip, port, username, camera.rtsp_url, "Conectado"))
                         save_cameras(self.cameras)
                         self.create_video_labels()
                         dialog.destroy()
-                        self.logger.info(f"Câmera ONVIF adicionada: IP={ip}, Porta={port}, Usuário={username}")
+                        self.logger.info(f"Câmera ONVIF adicionada: IP={ip}, Porta={port}, Usuário={username}, tipo: {type(camera)}")
                     else:
                         self.logger.error(f"Falha ao adicionar câmera ONVIF: IP={ip}")
                         messagebox.showerror("Erro", f"Falha ao conectar à câmera {ip}. Verifique os logs para mais detalhes.", parent=dialog)
@@ -300,13 +308,14 @@ class CameraApp:
                         return
 
                     camera = Camera(ip, port, user, password, rtsp_url, logger=self.logger)
+                    self.logger.info(f"Tipo do objeto Camera criado: {type(camera)}")
                     if camera.connect():
                         self.cameras.append(camera)
                         self.camera_list.insert("", "end", values=("RTSP", ip, port, user, rtsp_url, "Conectado"))
                         save_cameras(self.cameras)
                         self.create_video_labels()
                         dialog.destroy()
-                        self.logger.info(f"Câmera RTSP adicionada: IP={ip}, Porta={port}, Usuário={user}, URL={rtsp_url}")
+                        self.logger.info(f"Câmera RTSP adicionada: IP={ip}, Porta={port}, Usuário={user}, URL={rtsp_url}, tipo: {type(camera)}")
                     else:
                         self.logger.error(f"Falha ao adicionar câmera RTSP: URL={rtsp_url}")
                         messagebox.showerror("Erro", f"Falha ao conectar à câmera {rtsp_url}. Verifique os logs para mais detalhes.", parent=dialog)
@@ -387,13 +396,14 @@ class CameraApp:
                         camera.disconnect()
                         # Criar uma nova câmera com os dados atualizados
                         new_camera = Camera(ip, port, username, password, logger=self.logger)
+                        self.logger.info(f"Tipo do objeto Camera criado (editado): {type(new_camera)}")
                         if new_camera.connect():
                             self.cameras[index] = new_camera
                             self.camera_list.item(selected_item[0], values=("ONVIF", ip, port, username, new_camera.rtsp_url, "Conectado"))
                             save_cameras(self.cameras)
                             self.create_video_labels()
                             dialog.destroy()
-                            self.logger.info(f"Câmera ONVIF editada: IP={ip}, Porta={port}, Usuário={username}")
+                            self.logger.info(f"Câmera ONVIF editada: IP={ip}, Porta={port}, Usuário={username}, tipo: {type(new_camera)}")
                         else:
                             self.logger.error(f"Falha ao reconectar câmera ONVIF após edição: IP={ip}")
                             messagebox.showerror("Erro", f"Falha ao reconectar à câmera {ip}. Verifique os logs para mais detalhes.", parent=dialog)
@@ -439,13 +449,14 @@ class CameraApp:
                         camera.disconnect()
                         # Criar uma nova câmera com os dados atualizados
                         new_camera = Camera(ip, port, user, password, rtsp_url, logger=self.logger)
+                        self.logger.info(f"Tipo do objeto Camera criado (editado): {type(new_camera)}")
                         if new_camera.connect():
                             self.cameras[index] = new_camera
                             self.camera_list.item(selected_item[0], values=("RTSP", ip, port, user, rtsp_url, "Conectado"))
                             save_cameras(self.cameras)
                             self.create_video_labels()
                             dialog.destroy()
-                            self.logger.info(f"Câmera RTSP editada: IP={ip}, Porta={port}, Usuário={user}, URL={rtsp_url}")
+                            self.logger.info(f"Câmera RTSP editada: IP={ip}, Porta={port}, Usuário={user}, URL={rtsp_url}, tipo: {type(new_camera)}")
                         else:
                             self.logger.error(f"Falha ao reconectar câmera RTSP após edição: URL={rtsp_url}")
                             messagebox.showerror("Erro", f"Falha ao reconectar à câmera {rtsp_url}. Verifique os logs para mais detalhes.", parent=dialog)
@@ -474,9 +485,15 @@ class CameraApp:
             index = self.camera_list.index(selected_item[0])
             if index < len(self.cameras):
                 camera = self.cameras[index]
-                camera.disconnect()
+                if not isinstance(camera, Camera):
+                    self.logger.error(f"Objeto na lista de câmeras (índice {index}) não é uma instância de Camera: {type(camera)}")
+                else:
+                    try:
+                        camera.disconnect()
+                    except AttributeError as e:
+                        self.logger.error(f"Erro ao desconectar câmera (índice {index}): {e}, tipo do objeto: {type(camera)}")
+                    self.logger.info(f"Câmera removida: IP={camera.ip}, RTSP_URL={camera.rtsp_url}")
                 del self.cameras[index]
-                self.logger.info(f"Câmera removida: IP={camera.ip}, RTSP_URL={camera.rtsp_url}")
             self.camera_list.delete(selected_item[0])
             save_cameras(self.cameras)
             self.create_video_labels()
@@ -495,8 +512,14 @@ class CameraApp:
         try:
             self.logger.info("Fechando aplicativo...")
             self.running = False
-            for cam in self.cameras:
-                cam.disconnect()
+            for i, cam in enumerate(self.cameras):
+                if not isinstance(cam, Camera):
+                    self.logger.error(f"Objeto na lista de câmeras (índice {i}) não é uma instância de Camera: {type(cam)}")
+                    continue
+                try:
+                    cam.disconnect()
+                except AttributeError as e:
+                    self.logger.error(f"Erro ao desconectar câmera (índice {i}): {e}, tipo do objeto: {type(cam)}")
             self.root.destroy()
             self.logger.info("Aplicativo fechado.")
         except Exception as e:
@@ -504,11 +527,20 @@ class CameraApp:
 
     def load_cameras(self):
         try:
-            data = load_cameras()
+            data = load_cameras()  # Carrega os dados do JSON (lista de dicionários)
+            self.cameras = []  # Limpa a lista atual para evitar duplicatas
             for cam_data in data:
-                camera = Camera(cam_data["ip"], cam_data["port"], cam_data["username"],
-                                cam_data["password"], cam_data["rtsp_url"], logger=self.logger)
+                # Cria uma nova instância de Camera com os dados do JSON
+                camera = Camera(
+                    ip=cam_data["ip"],
+                    port=cam_data["port"],
+                    username=cam_data["username"],
+                    password=cam_data["password"],
+                    rtsp_url=cam_data.get("rtsp_url", ""),  # Usa .get() para evitar KeyError
+                    logger=self.logger
+                )
                 self.cameras.append(camera)
+                self.logger.info(f"Câmera carregada do JSON: {camera.ip}, tipo: {type(camera)}")
             self.logger.info(f"{len(self.cameras)} câmeras carregadas.")
         except Exception as e:
             self.logger.error(f"Erro ao carregar câmeras: {e}")
@@ -531,6 +563,10 @@ class CameraApp:
 
             for i, camera in enumerate(self.cameras):
                 if i < len(self.labels):
+                    # Verifica se camera é uma instância de Camera
+                    if not isinstance(camera, Camera):
+                        self.logger.error(f"Objeto na lista de câmeras (índice {i}) não é uma instância de Camera: {type(camera)}")
+                        continue
                     frame = camera.get_frame()
                     if frame is not None:
                         resized_frame = self.resize_frame(frame, self.labels[i], self.aspect_ratios[i])
