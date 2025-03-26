@@ -7,6 +7,9 @@ from PIL import Image, ImageTk
 from camera import Camera
 from utils import save_cameras, load_cameras
 from config import FRAME_UPDATE_INTERVAL
+from wsdiscovery import WSDiscovery  # Usar WSDiscovery em vez de ThreadedWSDiscovery
+from wsdiscovery.service import Service
+from onvif import ONVIFCamera
 
 # Adicionar log para verificar a origem da classe Camera
 import camera
@@ -173,6 +176,7 @@ class CameraApp:
             ttk.Button(button_frame, text="Adicionar Câmera RTSP", command=self.add_rtsp_camera_dialog).pack(side=tk.LEFT, padx=5)
             ttk.Button(button_frame, text="Editar Câmera", command=self.edit_camera_dialog).pack(side=tk.LEFT, padx=5)
             ttk.Button(button_frame, text="Remover Câmera", command=self.remove_camera).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Buscar Câmeras", command=self.discover_cameras).pack(side=tk.LEFT, padx=5)
 
             self.camera_list = ttk.Treeview(
                 self.camera_list_window, columns=("type", "ip", "port", "username", "rtsp_url", "status"), show="headings"
@@ -197,6 +201,74 @@ class CameraApp:
             self.logger.info("Janela de gerenciamento de câmeras aberta.")
         except Exception as e:
             self.logger.error(f"Erro ao abrir janela de gerenciamento de câmeras: {e}")
+
+    def discover_cameras(self):
+        """
+        Realiza a busca automática de câmeras ONVIF na rede local e exibe na lista.
+        """
+        try:
+            self.logger.info("Iniciando busca automática de câmeras ONVIF...")
+            # Limpar a lista atual para evitar duplicatas
+            for item in self.camera_list.get_children():
+                self.camera_list.delete(item)
+
+            # Usar WSDiscovery para encontrar câmeras ONVIF
+            wsd = WSDiscovery()
+            wsd.start()
+
+            # Definir o tipo de serviço que queremos descobrir (ONVIF)
+            type_ = "http://www.onvif.org/ver10/network/wsdl"
+            services = wsd.searchServices(types=[type_], timeout=5)  # Busca por 5 segundos
+
+            discovered_cameras = []
+            for service in services:
+                # Extrair informações do serviço
+                xaddrs = service.getXAddrs()
+                for xaddr in xaddrs:
+                    if "onvif" in xaddr.lower():
+                        ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', xaddr)
+                        if ip_match:
+                            ip = ip_match.group(1)
+                            # Tentar conectar para obter mais informações
+                            try:
+                                onvif_cam = ONVIFCamera(ip, 80, "admin", "", wsdl_dir=None, no_cache=True)
+                                device_info = onvif_cam.devicemgmt.GetDeviceInformation()
+                                username = "admin"  # Usuário padrão, pode ser ajustado
+                                port = 80  # Porta padrão ONVIF
+                                rtsp_url = ""
+                                status = "Descoberto (não conectado)"
+                                discovered_cameras.append({
+                                    "type": "ONVIF",
+                                    "ip": ip,
+                                    "port": port,
+                                    "username": username,
+                                    "rtsp_url": rtsp_url,
+                                    "status": status
+                                })
+                                self.logger.info(f"Câmera ONVIF descoberta: IP={ip}, Fabricante={device_info.Manufacturer}")
+                            except Exception as e:
+                                self.logger.warning(f"Falha ao obter informações da câmera {ip}: {e}")
+                                continue
+
+            wsd.stop()
+
+            # Adicionar câmeras descobertas à lista
+            for cam in discovered_cameras:
+                self.camera_list.insert("", "end", values=(
+                    cam["type"], cam["ip"], cam["port"], cam["username"], cam["rtsp_url"], cam["status"]
+                ))
+
+            # Re-adicionar câmeras já conectadas
+            for cam in self.cameras:
+                camera_type = "RTSP" if cam.rtsp_url else "ONVIF"
+                status = "Conectado" if cam.connected else "Desconectado"
+                self.camera_list.insert("", "end", values=(camera_type, cam.ip, cam.port, cam.username, cam.rtsp_url, status))
+
+            self.logger.info(f"Busca automática concluída. {len(discovered_cameras)} câmeras descobertas.")
+            messagebox.showinfo("Busca Concluída", f"{len(discovered_cameras)} câmeras ONVIF encontradas na rede.", parent=self.camera_list_window)
+        except Exception as e:
+            self.logger.error(f"Erro durante a busca automática de câmeras: {e}")
+            messagebox.showerror("Erro", f"Erro durante a busca de câmeras: {e}", parent=self.camera_list_window)
 
     def on_camera_list_window_close(self):
         try:
