@@ -14,7 +14,7 @@ import os
 import sys
 from datetime import datetime
 from appdirs import user_data_dir
-
+# Versao 0.1 estável
 # Configuração de logging
 app_name = "CameraApp"
 app_author = "CFATech"
