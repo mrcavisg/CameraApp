@@ -1,5 +1,9 @@
 # CameraApp
 
+## Nota de atualização
+
+// Realizar testes e ajustes apennas no diretório v0.2(testes). Os demais diretórios estão "estáveis" para uso.
+
 # Sistema minimalista para câmeras IP
 
 # Primeiros Passos
