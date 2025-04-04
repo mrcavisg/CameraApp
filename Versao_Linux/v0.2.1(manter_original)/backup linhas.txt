@@ -1,0 +1,67 @@
+metodo connect em camera.py 26/03 12:53
+
+
+
+   def connect(self):
+        self.logger.info(f"Tentando conectar à câmera {self.ip}...")
+        try:
+            if not self.rtsp_url:
+                self.logger.info(f"Descobrindo URL RTSP via ONVIF para {self.ip}")
+                if getattr(sys, 'frozen', False):
+                    wsdl_path = os.path.join(sys._MEIPASS, "onvif", "wsdl")
+                    self.logger.info(f"Configurando caminho WSDL para: {wsdl_path}")
+                    self.cam = onvif.ONVIFCamera(self.ip, self.port, self.username, self.password, wsdl_path=wsdl_path)
+                else:
+                    self.cam = onvif.ONVIFCamera(self.ip, self.port, self.username, self.password)
+                media = self.cam.create_media_service()
+                profiles = media.GetProfiles()
+                token = profiles[0].token
+                stream_uri = media.GetStreamUri(
+                    {"StreamSetup": {"Stream": "RTP-Unicast", "Transport": {"Protocol": "RTSP"}},
+                     "ProfileToken": token}
+                )
+                self.rtsp_url = stream_uri.Uri
+                self.logger.info(f"URL RTSP descoberta: {self.rtsp_url}")
+
+            self.logger.info(f"Tentando conectar ao stream RTSP: {self.rtsp_url}")
+            self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 10)
+            self.cap.set(cv2.CAP_PROP_FPS, 15)
+
+            os.environ["OPENCV_FFMPEG_READ_TIMEOUT"] = "60000"
+            os.environ["OPENCV_FFMPEG_READ_ATTEMPTS"] = "3"
+            os.environ["OPENCV_FFMPEG_READ_TRANSPORT"] = "tcp"
+
+            if not self.cap.isOpened():
+                raise Exception(f"Não foi possível abrir a câmera RTSP: {self.rtsp_url}")
+
+            ret, frame = self.cap.read()
+            if not ret:
+                raise Exception(f"Não foi possível ler o primeiro frame do stream RTSP: {self.rtsp_url}")
+
+            self.connected = True
+            self.thread = threading.Thread(target=self._read_frames, daemon=True)
+            self.thread.start()
+            self.logger.info(f"Conectado à câmera {self.ip} com sucesso")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Erro ao conectar à câmera {self.ip}: {e}")
+            self.connected = False
+            return False
+
+#####################################################################
+
+metodo load_cameras em app.py 26/03 12:53
+
+    def load_cameras(self):
+        try:
+            data = load_cameras()
+            for cam_data in data:
+                camera = Camera(cam_data["ip"], cam_data["port"], cam_data["username"],
+                                cam_data["password"], cam_data["rtsp_url"], logger=self.logger)
+                self.cameras.append(camera)
+            self.logger.info(f"{len(self.cameras)} câmeras carregadas.")
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar câmeras: {e}")
+            messagebox.showerror("Erro", f"Erro ao carregar câmeras: {e}", parent=self.root)
