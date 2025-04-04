@@ -39,7 +39,7 @@ class Camera:
         self.cap = None # Objeto VideoCapture do OpenCV
         self.connected = False # Estado da conexão
 
-    def connect(self, timeout=15): # Aumentado timeout padrão para ONVIF
+    def connect(self, timeout=30): # Aumentado timeout padrão para ONVIF
         """Tenta conectar à câmera via RTSP direto ou via ONVIF para descobrir RTSP."""
         self.logger.debug(f"Iniciando connect() para {self.ip}...")
         self.disconnect() # Garante estado inicial limpo
