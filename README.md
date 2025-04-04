@@ -1,4 +1,5 @@
-# CameraApp
+# CameraApp - Sistema minimalista para Câmeras IP
+# Autor: Caio Vinicius
 
 ## Nota de atualização
 
