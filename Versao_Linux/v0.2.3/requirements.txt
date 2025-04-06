@@ -1,0 +1,9 @@
+opencv-python
+pillow
+numpy
+onvif-zeep
+WSDiscovery
+ifaddr
+click
+requests
+appdirs
