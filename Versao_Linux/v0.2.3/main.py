@@ -1,4 +1,5 @@
 # main.py
+# Versão 0.2.3 criada em 15/08/2023
 import tkinter as tk
 import logging
 import os
