@@ -9,7 +9,10 @@
 
 # Primeiros Passos
 
-#  01 - Usar o GitClone do repositório ou fazer o doownload do mesmo no endereço https://github.com/mrcavisg/CameraApp
+#  01 - GitClone
+
+Usar o GitClone do repositório ou fazer o doownload do mesmo no endereço https://github.com/mrcavisg/CameraApp
+
 
 #  02 - Criar e iniciar o venv
 
