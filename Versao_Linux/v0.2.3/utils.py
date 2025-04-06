@@ -1,4 +1,4 @@
-# utils.py (CORRIGIDO - v4 com import tk garantido)
+# utils.py (CORRIGIDO v5 - GARANTINDO import tk)
 
 import logging
 import logging.handlers
@@ -7,20 +7,19 @@ import json
 import sys
 import tkinter as tk # <<< GARANTA QUE ESTA LINHA ESTEJA AQUI NO TOPO
 
-# IMPORTAR CONSTANTES DO CONFIG (com tratamento de erro e imports específicos)
+# IMPORTAR CONSTANTES DO CONFIG (com tratamento de erro)
 try:
-    # Importa APENAS o necessário
+    # Importa apenas o necessário
     from config import (DATA_DIR, CAMERAS_JSON, LOG_DIR,
                         LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT, LOGGER_NAME)
 except ImportError as e:
     print(f"ERRO CRÍTICO: Falha ao importar constantes de config.py: {e}. Usando fallbacks.", file=sys.stderr)
-    # Define fallbacks essenciais se config.py falhar
     LOGGER_NAME = "CameraApp_Fallback"
     try: # Tenta determinar diretório base
         if getattr(sys, 'frozen', False): base_dir = os.path.dirname(sys.executable)
         else: base_dir = os.path.dirname(os.path.abspath(__file__))
-    except Exception: base_dir = os.path.expanduser("~") # Último recurso
-    DATA_DIR = os.path.join(base_dir, "." + LOGGER_NAME.lower() + "_data") # Pasta oculta
+    except Exception: base_dir = os.path.expanduser("~")
+    DATA_DIR = os.path.join(base_dir, "." + LOGGER_NAME.lower() + "_data")
     LOG_DIR = os.path.join(DATA_DIR, "logs")
     CAMERAS_JSON = os.path.join(DATA_DIR, "cameras.json")
     LOG_LEVEL = logging.INFO
@@ -40,20 +39,17 @@ except ImportError:
 def setup_logging():
     """Configura e retorna uma instância do logger para a aplicação."""
     logger = logging.getLogger(LOGGER_NAME)
-    # Verifica se já foi configurado para evitar duplicação
-    if logger.handlers:
-        return logger
+    if logger.handlers: return logger # Evita handlers duplicados
 
     logger.setLevel(LOG_LEVEL)
 
     # Cria diretórios ANTES de configurar handlers
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        os.makedirs(LOG_DIR, exist_ok=True)
+        os.makedirs(LOG_DIR, exist_ok=True) # Cria LOG_DIR
         log_file_path = os.path.join(LOG_DIR, "cameraapp.log") # Nome fixo
     except OSError as e:
         print(f"AVISO: Não foi possível criar diretório de logs '{LOG_DIR}': {e}", file=sys.stderr)
-        log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cameraapp.log")
+        log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cameraapp.log") # Fallback
 
     formatter = logging.Formatter('%(asctime)s - %(name)s [%(levelname)s] - %(message)s (%(filename)s:%(lineno)d)')
 
@@ -66,10 +62,7 @@ def setup_logging():
     # File Handler (Rotativo)
     try:
         fh = logging.handlers.RotatingFileHandler(
-            log_file_path,
-            maxBytes=LOG_MAX_BYTES,
-            backupCount=LOG_BACKUP_COUNT,
-            encoding='utf-8'
+            log_file_path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding='utf-8'
         )
         fh.setLevel(LOG_LEVEL)
         fh.setFormatter(formatter)
@@ -105,14 +98,13 @@ def save_cameras(cameras: List['Camera'], logger: logging.Logger):
                  })
             else: log.warning(f"Ignorando objeto inválido ao salvar câmeras: {type(cam)}")
 
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True) # Cria diretório
         with open(filepath, "w", encoding='utf-8') as f:
             json.dump(camera_data, f, indent=4)
         log.info(f"Configurações de {len(camera_data)} câmeras salvas em {filepath}")
         return True
     except PermissionError as e:
         log.error(f"Sem permissão para escrever no arquivo de config.: {filepath} - {e}")
-        # messagebox só funciona se Tkinter estiver inicializado, evitamos aqui
         print(f"ERRO: Sem permissão para escrever no arquivo de config.: {filepath} - {e}", file=sys.stderr)
         return False
     except Exception as e:

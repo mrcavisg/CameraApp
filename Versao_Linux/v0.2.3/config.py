@@ -1,4 +1,4 @@
-# config.py (CORRIGIDO - Com constantes de Logging)
+# config.py (CORRIGIDO v2 - Com constantes de Logging)
 import os
 import sys
 import logging # Importa logging para usar seus níveis
@@ -7,7 +7,18 @@ import logging # Importa logging para usar seus níveis
 try:
     from appdirs import user_data_dir
 except ImportError:
-    user_data_dir = lambda appname, appauthor: os.path.join(os.path.expanduser("~"), "." + appname.lower() + "_data")
+    # Função fallback simples
+    def _fallback_user_data_dir(appname, appauthor):
+        # No Linux/macOS, usa ~/.local/share/<appname> (mais padrão que pasta oculta)
+        if sys.platform.startswith('linux') or sys.platform == 'darwin':
+            path = os.path.join(os.path.expanduser("~"), ".local", "share", appname)
+        # No Windows, usa %APPDATA%\<AppAuthor>\<AppName> (Appdirs faz isso melhor)
+        elif sys.platform == 'win32':
+            path = os.path.join(os.getenv('APPDATA', os.path.expanduser("~")), appauthor, appname)
+        else: # Outros OS, usa pasta oculta no home
+            path = os.path.join(os.path.expanduser("~"), "." + appname.lower() + "_data")
+        return path
+    user_data_dir = _fallback_user_data_dir # Usa o fallback
     print("AVISO: Biblioteca 'appdirs' não encontrada. Usando diretório de dados fallback.", file=sys.stderr)
 
 # --- Configurações do Aplicativo ---
@@ -23,36 +34,40 @@ except Exception as e:
     try: # Tenta determinar diretório base
         if getattr(sys, 'frozen', False): base_dir = os.path.dirname(sys.executable)
         else: base_dir = os.path.dirname(os.path.abspath(__file__))
-    except Exception: base_dir = os.path.expanduser("~")
-    DATA_DIR = os.path.join(base_dir, "." + APP_NAME.lower() + "_data")
+    except Exception: base_dir = os.path.expanduser("~") # Último recurso
+    # Evita criar pasta oculta diretamente no diretório do script se falhar
+    DATA_DIR = os.path.join(base_dir, "app_data")
 
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 CAMERAS_JSON = os.path.join(DATA_DIR, "cameras.json")
 
-# --- Configurações da Câmera ---
-CAMERA_CONNECT_TIMEOUT_ONVIF = 10 # Timeout para conexão ONVIF (segundos)
-CAMERA_CONNECT_TIMEOUT_CV_OPEN = 10000 # Timeout ABERTURA OpenCV (ms)
-CAMERA_CONNECT_TIMEOUT_CV_READ = 15000 # Timeout LEITURA OpenCV (ms)
-CAMERA_MAX_RETRIES = 5 # Máximo de tentativas de reconexão
-CAMERA_RETRY_DELAY_BASE = 2 # Base para espera exponencial (segundos)
-CAMERA_MAX_RETRY_WAIT = 60 # Tempo máximo de espera entre tentativas (segundos)
-CAMERA_FRAME_QUEUE_SIZE = 5 # Tamanho da fila de frames
-CAMERA_CONSECUTIVE_READ_FAILURES_LIMIT = 10 # Limite de falhas de leitura seguidas
+# --- Configurações da Câmera (Exemplo) ---
+# Você pode remover estas se não estiverem sendo usadas diretamente em outros módulos
+# Ou mantenha-as para referência centralizada
+CAMERA_CONNECT_TIMEOUT_ONVIF = 10
+CAMERA_CONNECT_TIMEOUT_CV_OPEN = 10000
+CAMERA_CONNECT_TIMEOUT_CV_READ = 15000
+CAMERA_MAX_RETRIES = 5
+CAMERA_RETRY_DELAY_BASE = 2
+CAMERA_MAX_RETRY_WAIT = 60
+CAMERA_FRAME_QUEUE_SIZE = 5
+CAMERA_CONSECUTIVE_READ_FAILURES_LIMIT = 10
 
 # --- Configurações da Interface ---
-FRAME_UPDATE_INTERVAL = 30  # Intervalo de atualização dos frames (ms) ~33 FPS
-DEFAULT_ASPECT_RATIO = "fit" # 'fit', '4:3', '16:9'
+FRAME_UPDATE_INTERVAL = 30  # ms
+DEFAULT_ASPECT_RATIO = "fit"
 
-# --- Configurações de Logging (ADICIONADAS/CORRIGIDAS) ---
-LOG_LEVEL = logging.DEBUG # Nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-LOG_MAX_BYTES = 5 * 1024 * 1024 # Tamanho máximo do arquivo de log (5MB)
-LOG_BACKUP_COUNT = 3 # Quantos arquivos de backup manter
+# --- Configurações de Logging (ADICIONADAS/GARANTIDAS) ---
+LOG_LEVEL = logging.DEBUG # Use DEBUG para mais detalhes, INFO para produção
+LOG_MAX_BYTES = 5 * 1024 * 1024 # 5MB
+LOG_BACKUP_COUNT = 3 # Manter 3 backups
 
-# --- Configurações de Rede ---
-ONVIF_DISCOVERY_TIMEOUT = 5 # Timeout para busca ONVIF (segundos)
-FORCE_TCP_TRANSPORT = True # Forçar TCP para RTSP no OpenCV
+# --- Configurações de Rede (Exemplo) ---
+ONVIF_DISCOVERY_TIMEOUT = 5
+FORCE_TCP_TRANSPORT = True
 
-# Logs Iniciais (Opcional, mas útil para depurar caminhos)
+# Logs Iniciais para depuração de caminhos (Opcional)
 print(f"INFO [config]: Diretório de dados: {DATA_DIR}")
 print(f"INFO [config]: Arquivo de câmeras: {CAMERAS_JSON}")
 print(f"INFO [config]: Diretório de logs: {LOG_DIR}")
+print(f"INFO [config]: Nível de log: {logging.getLevelName(LOG_LEVEL)}")
