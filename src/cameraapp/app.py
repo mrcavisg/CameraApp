@@ -20,6 +20,7 @@ from PIL import Image, ImageTk
 from cameraapp.camera import Camera, ONVIF_AVAILABLE
 from cameraapp.config import APP_NAME, LOGGER_NAME, UI_SETTINGS
 from cameraapp.utils import center_window, load_cameras, save_cameras
+from cameraapp.scanner import NetworkScanner, DiscoveredCamera, get_local_network
 
 # ONVIF discovery imports
 try:
@@ -94,6 +95,7 @@ class CameraApp:
         self._aspect_ratios: list[str] = []
         self._camera_list_window: Optional[tk.Toplevel] = None
         self._camera_treeview: Optional[ttk.Treeview] = None
+        self._empty_frame_counts: dict[str, int] = {}  # Track empty frames per camera
         self.running = True
 
         # Setup UI
@@ -379,6 +381,9 @@ class CameraApp:
                     frame = camera.get_frame()
 
                 if frame is not None:
+                    # Reset empty frame counter on successful frame
+                    self._empty_frame_counts[camera.ip] = 0
+
                     aspect = (
                         self._aspect_ratios[i]
                         if 0 <= i < len(self._aspect_ratios)
@@ -399,14 +404,19 @@ class CameraApp:
                     else:
                         label.config(image="", text="Resize Error", fg="red")
                 else:
-                    if camera.connected:
+                    # Track consecutive empty frames before marking disconnected
+                    empty_count = self._empty_frame_counts.get(camera.ip, 0) + 1
+                    self._empty_frame_counts[camera.ip] = empty_count
+
+                    # Only mark disconnected after 100 consecutive empty frames (~3 seconds)
+                    if camera.connected and empty_count >= 100:
                         self._logger.warning(f"Camera {camera.ip} stopped sending frames")
                         camera.connected = False
 
-                    if label.cget("text") != "Disconnected":
-                        label.config(image="", text="Disconnected", fg="orange")
-
-                    self._update_treeview_status(i, "Disconnected")
+                    if not camera.connected:
+                        if label.cget("text") != "Disconnected":
+                            label.config(image="", text="Disconnected", fg="orange")
+                        self._update_treeview_status(i, "Disconnected")
 
             if self.running:
                 self.root.after(UI_SETTINGS.frame_update_interval, self._update_frames)
@@ -492,6 +502,12 @@ class CameraApp:
                     text="Discover ONVIF",
                     command=self._discover_cameras,
                 ).pack(side=tk.LEFT, padx=2)
+
+            ttk.Button(
+                button_frame,
+                text="Scan Network",
+                command=self._open_network_scan_dialog,
+            ).pack(side=tk.LEFT, padx=2)
 
             ttk.Button(
                 button_frame,
@@ -1080,6 +1096,313 @@ class CameraApp:
                         wsd.stop()
                 except Exception:
                     pass
+
+    # ==================== Network Scanner ====================
+
+    def _open_network_scan_dialog(self) -> None:
+        """Open network scan dialog to find cameras."""
+        import threading
+
+        parent = self._camera_list_window or self.root
+        dialog = tk.Toplevel(parent)
+        dialog.title("Scan Network for Cameras")
+        dialog.geometry("600x500")
+        dialog.transient(parent)
+        dialog.grab_set()
+        center_window(dialog)
+
+        # Main frame
+        main_frame = ttk.Frame(dialog, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # IP Range input
+        input_frame = ttk.LabelFrame(main_frame, text="Scan Settings", padding="10")
+        input_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(input_frame, text="IP Range:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ip_entry = ttk.Entry(input_frame, width=30)
+        ip_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+
+        # Auto-detect network
+        local_net = get_local_network()
+        if local_net:
+            ip_entry.insert(0, local_net)
+        else:
+            ip_entry.insert(0, "192.168.0.0/24")
+
+        ttk.Label(input_frame, text="Ex: 192.168.0.0/24 ou 192.168.0.1-254").grid(
+            row=1, column=1, sticky=tk.W, padx=5
+        )
+
+        # Options
+        onvif_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            input_frame, text="Include ONVIF Discovery", variable=onvif_var
+        ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        # Progress
+        progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="10")
+        progress_frame.pack(fill=tk.X, pady=(0, 10))
+
+        progress_var = tk.DoubleVar(value=0)
+        progress_bar = ttk.Progressbar(
+            progress_frame, variable=progress_var, maximum=100
+        )
+        progress_bar.pack(fill=tk.X, pady=5)
+
+        status_label = ttk.Label(progress_frame, text="Ready to scan")
+        status_label.pack(anchor=tk.W)
+
+        # Store discovered cameras
+        discovered: list[DiscoveredCamera] = []
+        scanner: Optional[NetworkScanner] = None
+        scan_thread: Optional[threading.Thread] = None
+
+        def update_progress(current: int, total: int, message: str) -> None:
+            """Update progress from scanner (called from thread)."""
+            try:
+                if total > 0:
+                    pct = (current / total) * 100
+                    progress_var.set(pct)
+                status_label.config(text=message)
+                dialog.update_idletasks()
+            except Exception:
+                pass
+
+        def run_scan() -> None:
+            """Run scan in background thread."""
+            nonlocal discovered, scanner
+
+            try:
+                scanner = NetworkScanner(
+                    timeout=1.0,
+                    max_workers=100,
+                    progress_callback=lambda c, t, m: dialog.after(
+                        0, lambda: update_progress(c, t, m)
+                    ),
+                )
+
+                ip_range = ip_entry.get().strip()
+                include_onvif = onvif_var.get()
+
+                discovered = scanner.full_scan(
+                    ip_range=ip_range,
+                    include_onvif=include_onvif,
+                )
+
+                # Update UI in main thread
+                dialog.after(0, display_results)
+
+            except Exception as e:
+                dialog.after(
+                    0,
+                    lambda: messagebox.showerror("Scan Error", str(e), parent=dialog),
+                )
+            finally:
+                dialog.after(0, lambda: scan_btn.config(state=tk.NORMAL))
+                dialog.after(0, lambda: stop_btn.config(state=tk.DISABLED))
+
+        def display_results() -> None:
+            """Display scan results in treeview."""
+            # Clear previous results
+            for item in results_tree.get_children():
+                results_tree.delete(item)
+
+            for cam in discovered:
+                ports_str = ", ".join(str(p) for p in cam.ports[:4])
+                rtsp_url = cam.get_suggested_rtsp_url()
+                results_tree.insert(
+                    "",
+                    tk.END,
+                    values=(cam.ip, ports_str, cam.manufacturer, rtsp_url),
+                )
+
+            status_label.config(text=f"Scan complete: {len(discovered)} camera(s) found")
+            progress_var.set(100)
+
+        def start_scan() -> None:
+            """Start the network scan."""
+            nonlocal scan_thread
+
+            scan_btn.config(state=tk.DISABLED)
+            stop_btn.config(state=tk.NORMAL)
+            progress_var.set(0)
+
+            scan_thread = threading.Thread(target=run_scan, daemon=True)
+            scan_thread.start()
+
+        def stop_scan() -> None:
+            """Stop the running scan."""
+            if scanner:
+                scanner.stop()
+            stop_btn.config(state=tk.DISABLED)
+            status_label.config(text="Stopping scan...")
+
+        def add_selected() -> None:
+            """Add selected camera to the app."""
+            selected = results_tree.selection()
+            if not selected:
+                messagebox.showwarning(
+                    "Warning", "Select a camera to add", parent=dialog
+                )
+                return
+
+            item = results_tree.item(selected[0])
+            values = item["values"]
+            ip = values[0]
+            rtsp_url = values[3] if len(values) > 3 else ""
+
+            # Find the discovered camera
+            cam_data = next((c for c in discovered if c.ip == ip), None)
+            if not cam_data:
+                return
+
+            # Open dialog to get credentials
+            self._add_discovered_camera_dialog(dialog, cam_data)
+
+        # Buttons - pack at bottom FIRST so they always show
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+
+        scan_btn = ttk.Button(btn_frame, text="Start Scan", command=start_scan)
+        scan_btn.pack(side=tk.LEFT, padx=2)
+
+        stop_btn = ttk.Button(btn_frame, text="Stop", command=stop_scan, state=tk.DISABLED)
+        stop_btn.pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(btn_frame, text="Add Selected", command=add_selected).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        ttk.Button(btn_frame, text="Close", command=dialog.destroy).pack(
+            side=tk.RIGHT, padx=2
+        )
+
+        # Results - pack after buttons so it fills remaining space
+        results_frame = ttk.LabelFrame(main_frame, text="Found Cameras", padding="10")
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+
+        columns = ("ip", "ports", "manufacturer", "rtsp_url")
+        results_tree = ttk.Treeview(
+            results_frame, columns=columns, show="headings", height=6
+        )
+        results_tree.heading("ip", text="IP")
+        results_tree.column("ip", width=120)
+        results_tree.heading("ports", text="Ports")
+        results_tree.column("ports", width=100)
+        results_tree.heading("manufacturer", text="Type")
+        results_tree.column("manufacturer", width=80)
+        results_tree.heading("rtsp_url", text="Suggested RTSP URL")
+        results_tree.column("rtsp_url", width=200)
+        results_tree.pack(fill=tk.BOTH, expand=True)
+
+    def _add_discovered_camera_dialog(
+        self, parent: tk.Toplevel, cam_data: DiscoveredCamera
+    ) -> None:
+        """Dialog to add a discovered camera with credentials."""
+        dialog = tk.Toplevel(parent)
+        dialog.title(f"Add Camera - {cam_data.ip}")
+        dialog.geometry("450x250")
+        dialog.transient(parent)
+        dialog.grab_set()
+        center_window(dialog)
+
+        frame = ttk.Frame(dialog, padding="10")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # IP (readonly)
+        ttk.Label(frame, text="IP:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ip_label = ttk.Label(frame, text=cam_data.ip)
+        ip_label.grid(row=0, column=1, sticky=tk.W, pady=5)
+
+        # Manufacturer
+        ttk.Label(frame, text="Type:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(frame, text=cam_data.manufacturer).grid(row=1, column=1, sticky=tk.W, pady=5)
+
+        # Username
+        ttk.Label(frame, text="Username:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        user_entry = ttk.Entry(frame, width=30)
+        user_entry.grid(row=2, column=1, pady=5, sticky=tk.W)
+        user_entry.insert(0, "admin")
+
+        # Password
+        ttk.Label(frame, text="Password:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        pass_entry = ttk.Entry(frame, width=30, show="*")
+        pass_entry.grid(row=3, column=1, pady=5, sticky=tk.W)
+
+        # RTSP URL
+        ttk.Label(frame, text="RTSP URL:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        rtsp_entry = ttk.Entry(frame, width=40)
+        rtsp_entry.grid(row=4, column=1, pady=5, sticky=tk.W)
+
+        # Generate initial RTSP URL
+        suggested_url = cam_data.get_suggested_rtsp_url("admin", "")
+        rtsp_entry.insert(0, suggested_url)
+
+        def update_rtsp_url(*args) -> None:
+            """Update RTSP URL with credentials."""
+            user = user_entry.get().strip()
+            passwd = pass_entry.get()
+            url = cam_data.get_suggested_rtsp_url(user, passwd)
+            rtsp_entry.delete(0, tk.END)
+            rtsp_entry.insert(0, url)
+
+        user_entry.bind("<FocusOut>", update_rtsp_url)
+        pass_entry.bind("<FocusOut>", update_rtsp_url)
+
+        def save_camera() -> None:
+            """Save the camera configuration."""
+            username = user_entry.get().strip()
+            password = pass_entry.get()
+            rtsp_url = rtsp_entry.get().strip()
+
+            if not rtsp_url:
+                messagebox.showerror("Error", "RTSP URL is required", parent=dialog)
+                return
+
+            # Determine port
+            port = 554 if 554 in cam_data.ports else cam_data.ports[0] if cam_data.ports else 554
+
+            camera = Camera(
+                ip=cam_data.ip,
+                port=port,
+                username=username,
+                password=password,
+                rtsp_url=rtsp_url,
+                logger_instance=self._logger,
+            )
+
+            if camera.connect():
+                self.cameras.append(camera)
+                self._populate_camera_list()
+                save_cameras(self.cameras, self._logger)
+                self._create_video_labels()
+                dialog.destroy()
+                self._logger.info(f"Camera added: {cam_data.ip}")
+                messagebox.showinfo(
+                    "Success",
+                    f"Camera {cam_data.ip} added successfully!",
+                    parent=parent,
+                )
+            else:
+                messagebox.showerror(
+                    "Error",
+                    f"Failed to connect to {cam_data.ip}\n\nTry different credentials or RTSP URL.",
+                    parent=dialog,
+                )
+
+        # Buttons
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="Add Camera", command=save_camera).pack(
+            side=tk.RIGHT, padx=5
+        )
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(
+            side=tk.RIGHT
+        )
+
+        user_entry.focus_set()
 
     # ==================== Window Controls ====================
 

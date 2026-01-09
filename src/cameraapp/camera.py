@@ -205,20 +205,23 @@ class Camera:
         self,
         timeout_open: int = CAMERA_SETTINGS.connect_timeout_cv_open,
         timeout_read: int = CAMERA_SETTINGS.connect_timeout_cv_read,
+        start_thread: bool = True,
     ) -> bool:
         """
-        Connect to the camera and start frame capture thread.
+        Connect to the camera and optionally start frame capture thread.
 
         Args:
             timeout_open: OpenCV open timeout in milliseconds
             timeout_read: OpenCV read timeout in milliseconds
+            start_thread: Whether to start the reader thread (False for reconnection from thread)
 
         Returns:
             True if connection was successful
         """
         self._logger.debug(f"Connecting to {self.ip} (Type: {self.camera_type})...")
         self._state = CameraState.CONNECTING
-        self._stop_event.clear()
+        if start_thread:
+            self._stop_event.clear()
 
         # Get RTSP URL
         rtsp_url = self.rtsp_url
@@ -234,10 +237,8 @@ class Camera:
             self._state = CameraState.ERROR
             return False
 
-        # Add TCP transport if not present
+        # Use URL as-is (don't force transport=tcp as some cameras don't support it)
         url_to_connect = rtsp_url
-        if ";transport=tcp" not in rtsp_url.lower():
-            url_to_connect += ";transport=tcp"
 
         self._logger.info(f"Connecting with cv2.VideoCapture: {self._mask_url(url_to_connect)}")
 
@@ -267,8 +268,9 @@ class Camera:
             self._state = CameraState.CONNECTED
             self.rtsp_url = rtsp_url
 
-            # Start reader thread
-            self._start_reader_thread()
+            # Start reader thread (unless reconnecting from within thread)
+            if start_thread:
+                self._start_reader_thread()
             return True
 
         except Exception as e:
@@ -323,37 +325,41 @@ class Camera:
 
         while not self._stop_event.is_set():
             # Check connection
+            needs_reconnect = False
             with self._lock:
                 cap = self._cap
                 if not self._connected or cap is None or not cap.isOpened():
                     self._logger.warning(f"Camera {self.ip} disconnected in thread")
                     self._connected = False
+                    needs_reconnect = True
 
-                    # Attempt reconnection
-                    if retry_count < CAMERA_SETTINGS.max_retries:
-                        retry_count += 1
-                        wait_time = min(
-                            CAMERA_SETTINGS.retry_delay_base ** retry_count,
-                            CAMERA_SETTINGS.max_retry_wait,
-                        )
-                        self._logger.info(
-                            f"Reconnection attempt {retry_count}/{CAMERA_SETTINGS.max_retries} "
-                            f"for {self.ip} in {wait_time}s"
-                        )
+            # Handle reconnection outside of lock
+            if needs_reconnect:
+                if retry_count < CAMERA_SETTINGS.max_retries:
+                    retry_count += 1
+                    wait_time = min(
+                        CAMERA_SETTINGS.retry_delay_base ** retry_count,
+                        CAMERA_SETTINGS.max_retry_wait,
+                    )
+                    self._logger.info(
+                        f"Reconnection attempt {retry_count}/{CAMERA_SETTINGS.max_retries} "
+                        f"for {self.ip} in {wait_time}s"
+                    )
 
-                        if self._stop_event.wait(timeout=wait_time):
-                            break
-
-                        if self.connect():
-                            retry_count = 0
-                            consecutive_failures = 0
-                        continue
-                    else:
-                        self._logger.error(
-                            f"Max retries reached for {self.ip}. Stopping thread."
-                        )
-                        self._state = CameraState.ERROR
+                    if self._stop_event.wait(timeout=wait_time):
                         break
+
+                    # Reconnect without starting new thread (we ARE the thread)
+                    if self.connect(start_thread=False):
+                        retry_count = 0
+                        consecutive_failures = 0
+                    continue
+                else:
+                    self._logger.error(
+                        f"Max retries reached for {self.ip}. Stopping thread."
+                    )
+                    self._state = CameraState.ERROR
+                    break
 
             # Read frame
             try:
